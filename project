@@ -1,0 +1,133 @@
+import speech_recognition as sr
+import pyttsx3
+from openai import OpenAI
+import os
+import datetime
+
+# --- ------------------------------------------------------------------ --- #
+# --- IMPORTANT: OPENAI API KEY CONFIGURATION --- #
+# --- ------------------------------------------------------------------ --- #
+
+# Use environment variable (preferred) or hardcode your API key here:
+OPENAI_API_KEY = "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"  # Paste your actual key here inside the quotes
+
+if not OPENAI_API_KEY:
+    print("ERROR: OpenAI API Key is not set.")
+    print("Please set the OPENAI_API_KEY environment variable or hardcode the key.")
+    exit()
+
+# Initialize OpenAI client
+client = OpenAI(api_key=OPENAI_API_KEY)
+LLM_MODEL = "gpt-3.5-turbo"  # Or "gpt-4" if you have access
+
+# --- Initialize Text-to-Speech engine ---
+try:
+    engine = pyttsx3.init()
+    voices = engine.getProperty('voices')
+    # engine.setProperty('voice', voices[0].id)  # Optional: choose voice
+    engine.setProperty('rate', 160)
+except Exception as e:
+    print(f"Error initializing TTS engine: {e}")
+    engine = None
+
+def speak(text):
+    print(f"AI: {text}")
+    if engine:
+        try:
+            engine.say(text)
+            engine.runAndWait()
+        except Exception as e:
+            print(f"Error during speech: {e}")
+    else:
+        print("(TTS engine not available)")
+
+def listen_for_command():
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Calibrating microphone...")
+        try:
+            r.adjust_for_ambient_noise(source, duration=1)
+        except Exception as e:
+            print(f"Warning: Could not adjust for ambient noise: {e}")
+        print("Listening...")
+        try:
+            audio = r.listen(source, timeout=7, phrase_time_limit=10)
+        except sr.WaitTimeoutError:
+            print("No speech detected within timeout.")
+            return None
+        except Exception as e:
+            print(f"Error during listening: {e}")
+            return None
+
+    try:
+        print("Recognizing speech...")
+        command = r.recognize_google(audio)
+        print(f"You said: {command}")
+        return command.lower()
+    except sr.UnknownValueError:
+        speak("Sorry, I could not understand what you said.")
+    except sr.RequestError as e:
+        speak(f"Could not request results from speech service; {e}")
+    except Exception as e:
+        speak(f"Unexpected error during recognition: {e}")
+    return None
+
+def get_llm_response(prompt_text):
+    """Sends prompt to OpenAI and gets a response."""
+    if not prompt_text:
+        return "I didn't hear anything to respond to."
+
+    try:
+        print(f"Sending to {LLM_MODEL}: \"{prompt_text}\"")
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[
+                {"role": "system", "content": "You are a helpful voice assistant. Keep your answers relatively concise for voice output."},
+                {"role": "user", "content": prompt_text}
+            ],
+            max_tokens=150,
+            temperature=0.7
+        )
+        answer = response.choices[0].message.content.strip()
+        return answer
+
+    except Exception as e:
+        error_msg = f"An error occurred while getting LLM response: {e}"
+        print(error_msg)
+        # Fallback answer so the assistant still talks
+        return "Sorry, I am having trouble accessing my knowledge base right now. Please try again later."
+
+def process_command(command):
+    """Processes the command: some local, others to LLM."""
+    if command is None:
+        return
+
+    if any(x in command for x in ["goodbye", "exit", "stop listening"]):
+        speak("Goodbye! Have a great day.")
+        return "exit"
+
+    elif "what time is it" in command or "current time" in command:
+        now = datetime.datetime.now()
+        current_time = now.strftime("%I:%M %p")
+        speak(f"The current time is {current_time}")
+
+    elif "what is the date" in command or "today's date" in command:
+        now = datetime.datetime.now()
+        current_date = now.strftime("%A, %B %d, %Y")
+        speak(f"Today is {current_date}")
+
+    else:
+        if command.strip():
+            ai_answer = get_llm_response(command)
+            speak(ai_answer)
+        else:
+            speak("I didn't quite catch that. Could you please repeat?")
+
+if __name__ == "__main__":
+    speak("AI Voice Assistant activated. How can I help you?")
+    while True:
+        command = listen_for_command()
+        if command:
+            action = process_command(command)
+            if action == "exit":
+                break
